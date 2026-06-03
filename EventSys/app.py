@@ -1,3 +1,4 @@
+import base64
 import os
 
 import calendar
@@ -19,6 +20,9 @@ def init_session_state():
 
     if "producto_cotizar" not in st.session_state:
         st.session_state.producto_cotizar = None
+
+    if "carrito" not in st.session_state:
+        st.session_state.carrito = []
 
 
 def cargar_productos():
@@ -50,11 +54,19 @@ def render_styles():
         }
 
         .hero{
-        background:linear-gradient(135deg,#2b2b2b,#000);
-        padding:60px;
-        border-radius:20px;
+        background:transparent;
+        padding:20px 0 10px;
+        border-radius:0;
         text-align:center;
-        margin-bottom:40px;
+        margin-bottom:30px;
+        }
+
+        .hero-logo{
+        display:block;
+        margin:0 auto 20px;
+        width:320px;
+        max-width:90%;
+        height:auto;
         }
 
         h1{
@@ -144,8 +156,70 @@ def render_styles():
     )
 
 
+def calcular_total_carrito():
+    return sum(item.get("subtotal", 0) for item in st.session_state.carrito)
+
+
+def render_carrito():
+    st.title("Carrito de Compras")
+
+    if not st.session_state.carrito:
+        st.info("El carrito está vacío. Agrega productos desde el inventario.")
+    else:
+        for index, item in enumerate(st.session_state.carrito):
+            cols = st.columns([1, 2, 1])
+            with cols[0]:
+                if item.get("imagen"):
+                    src = get_image_src(item["imagen"])
+                    if src:
+                        st.image(src, width=160)
+                    else:
+                        st.image("https://via.placeholder.com/160x120?text=Sin+Imagen", width=160)
+                else:
+                    st.image("https://via.placeholder.com/160x120?text=Sin+Imagen", width=160)
+
+            with cols[1]:
+                st.markdown(f"#### {item['nombre']}")
+                if item.get("categoria"):
+                    st.write(f"Categoría: {item['categoria']}")
+                cantidad_cantidad = st.number_input(
+                    "Cantidad",
+                    min_value=1,
+                    max_value=item.get("max_cantidad", max(1, item.get("cantidad", 1))),
+                    value=item["cantidad"],
+                    key=f"cantidad_{index}",
+                )
+                if cantidad_cantidad != item["cantidad"]:
+                    item["cantidad"] = cantidad_cantidad
+                    item["subtotal"] = item["precio"] * cantidad_cantidad
+                st.write(f"Precio unitario: ${item['precio']:.2f}")
+                if item.get("descripcion"):
+                    st.write(item["descripcion"])
+
+            with cols[2]:
+                st.write(f"**Subtotal:** ${item['subtotal']:.2f}")
+                if st.button("Eliminar", key=f"eliminar_{index}"):
+                    st.session_state.carrito.pop(index)
+                    st.rerun()
+
+            st.markdown("---")
+
+        total = calcular_total_carrito()
+        st.markdown(f"### Total del carrito: ${total:.2f}")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Seguir comprando"):
+                st.session_state.pagina = "inventario"
+                st.rerun()
+        with c2:
+            if st.button("Vaciar carrito"):
+                st.session_state.carrito = []
+                st.rerun()
+
+
 def render_navigation():
-    n1, n2, n3, n4 = st.columns(4)
+    n1, n2, n3, n4, n5 = st.columns([1, 1, 1, 1, 1])
 
     with n1:
         if st.button("Inicio"):
@@ -167,17 +241,51 @@ def render_navigation():
             st.session_state.pagina = "ayuda"
             st.rerun()
 
+    with n5:
+        count = len(st.session_state.carrito)
+        total = calcular_total_carrito()
+        label = f"🛒 Carrito ({count})" if count else "🛒 Carrito"
+        if st.button(label, key="boton_carrito"):
+            st.session_state.pagina = "carrito"
+            st.rerun()
+        if count:
+            st.markdown(
+                f"<div style='text-align:right; font-size:12px; color:#cdb4db;'>Total: ${total:.2f}</div>",
+                unsafe_allow_html=True,
+            )
+
 
 def render_hero():
-    st.markdown(
-        """
-        <div class="hero">
-        <h1>🎉 EventSys</h1>
-        <p>Mobiliario premium para tus eventos</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Aquí está el bloque principal del encabezado de la página.
+    # Si colocas tu logo como logo.png, logo.jpg o logo.jpeg dentro de la carpeta del proyecto,
+    # se mostrará centrado en la parte superior.
+    logo_candidates = ["logo.png", "logo.jpg", "logo.jpeg"]
+    logo_path = next((path for path in logo_candidates if os.path.exists(path)), None)
+
+    if logo_path:
+        ext = os.path.splitext(logo_path)[1].lower().replace(".", "")
+        with open(logo_path, "rb") as f:
+            encoded_logo = base64.b64encode(f.read()).decode()
+        logo_src = f"data:image/{ext};base64,{encoded_logo}"
+        st.markdown(
+            f"""
+            <div class="hero">
+            <img src="{logo_src}" class="hero-logo" />
+            <p>Mobiliario premium para tus eventos</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+            <div class="hero">
+            <h1>🎉 EventSys</h1>
+            <p>Mobiliario premium para tus eventos</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def render_feature_cards():
@@ -275,10 +383,13 @@ def render_product_card(product, key_prefix):
     )
 
     producto_dict = {
+        "id": product["id"],
         "nombre": product["nombre"],
         "precio": product["precio"],
         "disp": product["cantidad"],
         "imagen": imagen_producto,
+        "categoria": product["categoria"],
+        "descripcion": descripcion_producto,
     }
 
     if st.button("Cotizar", key=f"{key_prefix}_{product['id']}"):
@@ -363,13 +474,21 @@ def render_cotizacion():
     c1, c2 = st.columns(2)
     with c1:
         if st.button("Confirmar pedido"):
-            st.success("Pedido enviado correctamente")
-            st.write("Producto:", producto["nombre"])
-            st.write("Cantidad:", cantidad)
-            st.write("Total:", total)
-            st.write("Correo:", correo)
-            st.write("Teléfono:", telefono)
-            st.write("Pago:", metodo_pago)
+            item = {
+                "id": producto.get("id"),
+                "nombre": producto["nombre"],
+                "categoria": producto.get("categoria", ""),
+                "descripcion": producto.get("descripcion", ""),
+                "precio": float(producto["precio"]),
+                "cantidad": cantidad,
+                "subtotal": total,
+                "imagen": producto.get("imagen", ""),
+                "max_cantidad": producto.get("disp", cantidad),
+            }
+            st.session_state.carrito.append(item)
+            st.success("Producto agregado al carrito correctamente")
+            st.session_state.pagina = "carrito"
+            st.rerun()
 
     with c2:
         if st.button("Volver"):
@@ -468,6 +587,8 @@ def main():
         render_inventory()
     elif pagina == "cotizacion":
         render_cotizacion()
+    elif pagina == "carrito":
+        render_carrito()
     elif pagina == "calendario":
         render_calendar()
     elif pagina == "ayuda":
